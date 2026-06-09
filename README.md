@@ -1,75 +1,75 @@
-# Legal Multi-Agent System with A2A Protocol
+# Hệ Thống Multi-Agent Pháp Lý với Giao Thức A2A
 
-A distributed legal advisory system where specialised AI agents collaborate using Google's [Agent-to-Agent (A2A) protocol](https://github.com/google/A2A). Built with **LangGraph**, **LangChain**, and the **a2a-sdk**, the project serves as both a working demo and a hands-on learning path — progressing from a simple LLM API call (Stage 1) to a fully distributed multi-agent network (Stage 5).
+Đây là một hệ thống tư vấn pháp lý phân tán, nơi các AI agent chuyên biệt phối hợp với nhau bằng [giao thức Agent-to-Agent (A2A) của Google](https://github.com/google/A2A). Được xây dựng bằng **LangGraph**, **LangChain** và **a2a-sdk**, dự án này vừa là một demo chạy được, vừa là lộ trình học thực hành — đi từ một lời gọi API LLM đơn giản (Stage 1) đến một mạng multi-agent phân tán hoàn chỉnh (Stage 5).
 
-## Architecture
+## Kiến Trúc
 
 ```
                      ┌─────────────────────┐
-                     │  Registry Service   │  :10000
+                     │  Dịch vụ Registry   │  :10000
                      │  /register          │
                      │  /discover/{task}   │
                      └─────────┬───────────┘
-                               │  (agents self-register on startup)
+                               │  (các agent tự đăng ký khi khởi động)
           ┌────────────────────┼─────────────────────┐
           │                    │                     │
    Tax Agent :10102   Law Agent :10101    Compliance Agent :10103
           │                    │                     │
-          └─────────► delegates in parallel ◄────────┘
+          └─────────► ủy quyền song song ◄───────────┘
                                │
                         Customer Agent :10100
                                │
-                             User
+                            Người dùng
 ```
 
-**Customer Agent** receives a user question and delegates to the **Law Agent**, which analyses the legal aspects, then dispatches to **Tax Agent** and **Compliance Agent** in parallel via LangGraph's `Send` API. Results are aggregated into a comprehensive legal analysis.
+**Customer Agent** nhận câu hỏi từ người dùng và ủy quyền cho **Law Agent**. **Law Agent** phân tích khía cạnh pháp lý, sau đó gửi song song sang **Tax Agent** và **Compliance Agent** thông qua API `Send` của LangGraph. Các kết quả được tổng hợp thành một bản phân tích pháp lý đầy đủ.
 
-All agent discovery is dynamic — agents register their capabilities with the **Registry** on startup and discover each other at runtime. No hardcoded URLs.
+Việc khám phá agent hoàn toàn động — các agent đăng ký năng lực của mình với **Registry** khi khởi động và tìm nhau trong lúc chạy. Không có URL agent bị hardcode.
 
-### Agent Details
+### Chi Tiết Agent
 
-| Agent | Port | LangGraph Pattern | Role |
+| Agent | Port | Pattern LangGraph | Vai trò |
 |---|---|---|---|
-| Customer Agent | 10100 | `create_react_agent` | Entry point — routes user questions to Law Agent |
-| Law Agent | 10101 | Custom `StateGraph` | Orchestrator — analyses law, delegates in parallel |
-| Tax Agent | 10102 | `create_react_agent` | Specialist — tax law, IRS, penalties, FBAR/FATCA |
-| Compliance Agent | 10103 | `create_react_agent` | Specialist — SEC, SOX, FCPA, GDPR, AML |
-| Registry | 10000 | FastAPI (not an agent) | Service discovery and agent registration |
+| Customer Agent | 10100 | `create_react_agent` | Điểm vào — định tuyến câu hỏi của người dùng đến Law Agent |
+| Law Agent | 10101 | `StateGraph` tùy chỉnh | Agent điều phối — phân tích luật, ủy quyền song song |
+| Tax Agent | 10102 | `create_react_agent` | Chuyên gia — luật thuế, IRS, hình phạt, FBAR/FATCA |
+| Compliance Agent | 10103 | `create_react_agent` | Chuyên gia — SEC, SOX, FCPA, GDPR, AML |
+| Registry | 10000 | FastAPI (không phải agent) | Khám phá dịch vụ và đăng ký agent |
 
-### Request Flow
+### Luồng Request
 
 ```
-User question
-  → Customer Agent: LLM detects legal domain, calls delegate tool
-    → Registry: discover("legal_question") → Law Agent endpoint
+Câu hỏi của người dùng
+  → Customer Agent: LLM nhận diện miền pháp lý, gọi delegate tool
+    → Registry: discover("legal_question") → endpoint của Law Agent
     → Law Agent:
-        [analyze_law]      LLM contract/tort analysis
-        [check_routing]    LLM decides: needs_tax? needs_compliance?
+        [analyze_law]      LLM phân tích hợp đồng/bồi thường ngoài hợp đồng
+        [check_routing]    LLM quyết định: needs_tax? needs_compliance?
         [call_tax]         ──→ Registry discover → Tax Agent (A2A)     ┐
-        [call_compliance]  ──→ Registry discover → Compliance (A2A)    ├ parallel
-        [aggregate]        Combines all analyses into final response   ┘
-  → Customer Agent returns response to user
+        [call_compliance]  ──→ Registry discover → Compliance (A2A)    ├ song song
+        [aggregate]        Kết hợp tất cả phân tích thành phản hồi cuối ┘
+  → Customer Agent trả phản hồi cho người dùng
 ```
 
-### Key Design Patterns
+### Các Pattern Thiết Kế Chính
 
-- **Dynamic discovery** — agents find each other through the Registry, not hardcoded URLs
-- **Parallel delegation** — LangGraph `Send` API dispatches tax and compliance branches concurrently
-- **Trace propagation** — `trace_id` and `context_id` flow through every A2A hop for debugging
-- **Depth guards** — `MAX_DELEGATION_DEPTH = 3` prevents infinite delegation loops
-- **Annotated reducers** — `Annotated[str, _last_wins]` handles parallel writes to shared state fields
+- **Khám phá động** — các agent tìm nhau thông qua Registry, không dùng URL hardcode
+- **Ủy quyền song song** — API `Send` của LangGraph dispatch các nhánh tax và compliance đồng thời
+- **Lan truyền trace** — `trace_id` và `context_id` đi qua từng A2A hop để hỗ trợ debug
+- **Chặn độ sâu** — `MAX_DELEGATION_DEPTH = 3` ngăn vòng lặp ủy quyền vô hạn
+- **Annotated reducers** — `Annotated[str, _last_wins]` xử lý việc nhiều nhánh song song ghi vào cùng field trong state
 
 ## Tech Stack
 
-| Layer | Choice |
+| Tầng | Lựa chọn |
 |---|---|
 | Agent framework | [LangGraph](https://langchain-ai.github.io/langgraph/) |
-| LLM provider | Any model via [OpenRouter](https://openrouter.ai) (OpenAI-compatible API) |
+| Nhà cung cấp LLM | Bất kỳ model nào qua [OpenRouter](https://openrouter.ai) (API tương thích OpenAI) |
 | A2A transport | [a2a-sdk](https://pypi.org/project/a2a-sdk/) |
-| Registry | FastAPI + in-memory store |
+| Registry | FastAPI + store trong bộ nhớ |
 | Package manager | [uv](https://docs.astral.sh/uv/) |
 
-## 📚 Codelab for Students
+## 📚 Codelab cho Sinh Viên
 
 **Thời gian:** 2 giờ | **Ngôn ngữ:** Tiếng Việt
 
@@ -101,40 +101,40 @@ Tổng kết & Q&A (15 phút)
 
 ---
 
-## Getting Started
+## Bắt Đầu
 
-### Prerequisites
+### Yêu Cầu Trước Khi Chạy
 
 - Python 3.11+
-- [uv](https://docs.astral.sh/uv/) package manager
-- An [OpenRouter](https://openrouter.ai) API key
+- Package manager [uv](https://docs.astral.sh/uv/)
+- API key [OpenRouter](https://openrouter.ai)
 
-### Setup
+### Cài Đặt
 
 ```bash
-# Clone and install
+# Clone và cài đặt
 git clone <repo-url>
 cd legal_multiagent
 uv sync
 
-# Configure environment
+# Cấu hình môi trường
 cp .env.example .env
-# Edit .env with your OpenRouter API key
+# Chỉnh sửa .env với OpenRouter API key của bạn
 ```
 
-### Run the Full System (Stage 5)
+### Chạy Toàn Bộ Hệ Thống (Stage 5)
 
 ```bash
-# Start all 5 services (registry + 4 agents)
+# Khởi động cả 5 service (registry + 4 agents)
 ./start_all.sh
 
-# In another terminal, send a test question
+# Trong terminal khác, gửi một câu hỏi test
 uv run python test_client.py
 ```
 
-### Run Individual Stage Demos
+### Chạy Demo Từng Stage
 
-No servers needed — each demo runs as a standalone script:
+Không cần server — mỗi demo chạy như một script độc lập:
 
 ```bash
 uv run python stages/stage_1_direct_llm/main.py
@@ -143,77 +143,77 @@ uv run python stages/stage_3_single_agent/main.py
 uv run python stages/stage_4_multi_agent/main.py
 ```
 
-## LLM Evolution Stages
+## Các Stage Phát Triển LLM
 
-The `stages/` folder contains progressive demos that build from simple to complex, matching the roadmap in `docs/10_llm_roadmap.svg`:
+Thư mục `stages/` chứa các demo tăng dần độ phức tạp từ đơn giản đến nâng cao, khớp với lộ trình trong `docs/10_llm_roadmap.svg`:
 
-| Stage | Name | What It Demonstrates |
+| Stage | Tên | Nội dung minh họa |
 |---|---|---|
-| **1** | Direct LLM Calling | Stateless prompt → response. No tools, no memory. |
-| **2** | LLM + RAG / Tools | Tool calling with a keyword-match knowledge base and damage calculator. Manual single-pass orchestration. |
-| **3** | Single Agent (ReAct) | Autonomous Think → Act → Observe loop via `create_react_agent`. Agent decides which tools to call and when. |
-| **4** | Multi-Agent (In-Process) | Multiple specialised agents with parallel execution via `StateGraph` + `Send` API. Same topology as Stage 5 but in a single process. |
-| **5** | Distributed A2A (This Project) | Full distributed system — each agent is an independent HTTP service communicating via A2A protocol with dynamic discovery. |
+| **1** | Gọi LLM trực tiếp | Prompt không trạng thái → phản hồi. Không tool, không memory. |
+| **2** | LLM + RAG / Tools | Tool calling với knowledge base khớp từ khóa và công cụ tính thiệt hại. Điều phối thủ công một lượt. |
+| **3** | Single Agent (ReAct) | Vòng lặp tự động Think → Act → Observe qua `create_react_agent`. Agent tự quyết định gọi tool nào và khi nào. |
+| **4** | Multi-Agent (In-Process) | Nhiều agent chuyên biệt chạy song song qua `StateGraph` + API `Send`. Cùng topology với Stage 5 nhưng chạy trong một process. |
+| **5** | Distributed A2A (Dự án này) | Hệ thống phân tán hoàn chỉnh — mỗi agent là một HTTP service độc lập, giao tiếp bằng giao thức A2A với khám phá động. |
 
-Each stage's folder includes an `architecture.svg` diagram and a self-contained `main.py`.
+Mỗi thư mục stage có một sơ đồ `architecture.svg` và một file `main.py` tự chạy.
 
-## Project Structure
+## Cấu Trúc Dự Án
 
 ```
 legal_multiagent/
-├── start_all.sh               # Launches all services in correct order
-├── test_client.py             # E2E test client
-├── pyproject.toml             # Dependencies (uv-managed)
-├── .env.example               # Required environment variables
+├── start_all.sh               # Khởi chạy tất cả service theo đúng thứ tự
+├── test_client.py             # Client test E2E
+├── pyproject.toml             # Dependencies (quản lý bằng uv)
+├── .env.example               # Các biến môi trường cần thiết
 │
-├── common/                    # Shared utilities
-│   ├── llm.py                 # get_llm() → ChatOpenAI via OpenRouter
-│   ├── a2a_client.py          # delegate() — A2A message sending
+├── common/                    # Tiện ích dùng chung
+│   ├── llm.py                 # get_llm() → ChatOpenAI qua OpenRouter
+│   ├── a2a_client.py          # delegate() — gửi message A2A
 │   └── registry_client.py     # discover() / register() — Registry API
 │
-├── registry/                  # Service discovery (port 10000)
-├── customer_agent/            # Entry point agent (port 10100)
-├── law_agent/                 # Legal orchestrator (port 10101)
-├── tax_agent/                 # Tax specialist (port 10102)
-├── compliance_agent/          # Compliance specialist (port 10103)
+├── registry/                  # Khám phá dịch vụ (port 10000)
+├── customer_agent/            # Agent điểm vào (port 10100)
+├── law_agent/                 # Agent điều phối pháp lý (port 10101)
+├── tax_agent/                 # Chuyên gia thuế (port 10102)
+├── compliance_agent/          # Chuyên gia compliance (port 10103)
 │
-├── stages/                    # Progressive learning demos (1-4)
+├── stages/                    # Demo học tập tăng dần (1-4)
 │   ├── stage_1_direct_llm/
 │   ├── stage_2_rag_tools/
 │   ├── stage_3_single_agent/
 │   └── stage_4_multi_agent/
 │
-└── docs/                      # Architecture diagrams (SVG)
+└── docs/                      # Sơ đồ kiến trúc (SVG)
 ```
 
-Each agent module follows the same structure:
-- **`graph.py`** — LangGraph graph definition (all agent logic)
-- **`agent_executor.py`** — Bridge between A2A SDK and LangGraph
-- **`__main__.py`** — Server bootstrap, agent card, registration
+Mỗi module agent có cùng cấu trúc:
+- **`graph.py`** — định nghĩa graph LangGraph (toàn bộ logic agent)
+- **`agent_executor.py`** — cầu nối giữa A2A SDK và LangGraph
+- **`__main__.py`** — bootstrap server, agent card, đăng ký agent
 
-## Configuration
+## Cấu Hình
 
-| Environment Variable | Description | Default |
+| Biến môi trường | Mô tả | Mặc định |
 |---|---|---|
-| `OPENROUTER_API_KEY` | Your OpenRouter API key | (required) |
-| `OPENROUTER_MODEL` | Model identifier | `anthropic/claude-sonnet-4-5` |
-| `REGISTRY_URL` | Registry service URL | `http://localhost:10000` |
+| `OPENROUTER_API_KEY` | OpenRouter API key của bạn | (bắt buộc) |
+| `OPENROUTER_MODEL` | Định danh model | `anthropic/claude-sonnet-4-5` |
+| `REGISTRY_URL` | URL của Registry service | `http://localhost:10000` |
 
-The model is swappable to any OpenRouter-supported model (e.g., `openai/gpt-4o`, `google/gemini-2.0-flash`).
+Model có thể thay bằng bất kỳ model nào OpenRouter hỗ trợ, ví dụ `openai/gpt-4o`, `google/gemini-2.0-flash`.
 
-## Documentation Diagrams
+## Sơ Đồ Tài Liệu
 
-The `docs/` folder contains SVG architecture diagrams:
+Thư mục `docs/` chứa các sơ đồ kiến trúc SVG:
 
-| Diagram | Topic |
+| Sơ đồ | Chủ đề |
 |---|---|
-| `01_why_multiagent` | Why multi-agent over monolithic LLMs |
-| `02_a2a_vs_traditional` | A2A protocol vs traditional multi-agent |
-| `03_a2a_protocol` | A2A protocol technical details |
-| `04_system_architecture` | Full system architecture |
-| `05_law_agent_graph` | Law Agent StateGraph deep dive |
-| `06_request_flow` | End-to-end request flow with trace propagation |
-| `07_a2a_intro` | Introduction to A2A protocol |
-| `08_a2a_core_concepts` | A2A core concepts (Agent Cards, Tasks, Parts) |
-| `09_a2a_interaction_flow` | A2A interaction flow patterns |
-| `10_llm_roadmap` | LLM evolution roadmap (Stages 1–5) |
+| `01_why_multiagent` | Vì sao dùng multi-agent thay vì LLM nguyên khối |
+| `02_a2a_vs_traditional` | Giao thức A2A so với multi-agent truyền thống |
+| `03_a2a_protocol` | Chi tiết kỹ thuật của giao thức A2A |
+| `04_system_architecture` | Kiến trúc toàn hệ thống |
+| `05_law_agent_graph` | Phân tích sâu StateGraph của Law Agent |
+| `06_request_flow` | Luồng request end-to-end với trace propagation |
+| `07_a2a_intro` | Giới thiệu giao thức A2A |
+| `08_a2a_core_concepts` | Các khái niệm cốt lõi của A2A (Agent Cards, Tasks, Parts) |
+| `09_a2a_interaction_flow` | Các pattern luồng tương tác A2A |
+| `10_llm_roadmap` | Lộ trình phát triển LLM (Stages 1-5) |
