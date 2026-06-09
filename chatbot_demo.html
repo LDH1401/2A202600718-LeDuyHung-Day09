@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Stage 5 A2A Chatbot Demo</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --ink: #18202a;
+      --muted: #667085;
+      --line: #d9dee7;
+      --accent: #0f6b63;
+      --accent-2: #1f7a8c;
+      --warn: #9a5b00;
+      --bad: #b42318;
+      --good: #15734f;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 340px;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .chat {
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      border-right: 1px solid var(--line);
+    }
+
+    header {
+      height: 68px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 22px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin-top: 4px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fbfcfd;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--warn);
+    }
+
+    .dot.ok { background: var(--good); }
+    .dot.bad { background: var(--bad); }
+
+    .messages {
+      padding: 18px 22px;
+      overflow: auto;
+    }
+
+    .msg {
+      max-width: 880px;
+      margin: 0 0 14px;
+      display: grid;
+      gap: 6px;
+    }
+
+    .msg.user { margin-left: auto; justify-items: end; }
+    .msg.assistant { justify-items: start; }
+
+    .bubble {
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      line-height: 1.48;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      font-size: 14px;
+    }
+
+    .user .bubble {
+      background: #e8f4f2;
+      border-color: #b7d8d2;
+    }
+
+    .meta {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .composer {
+      padding: 14px 22px 18px;
+      background: var(--panel);
+      border-top: 1px solid var(--line);
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 82px;
+      max-height: 160px;
+      resize: vertical;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 11px 12px;
+      font: inherit;
+      line-height: 1.45;
+      color: var(--ink);
+      background: #fbfcfd;
+    }
+
+    .actions {
+      margin-top: 10px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      justify-content: space-between;
+    }
+
+    .target {
+      display: inline-flex;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fbfcfd;
+    }
+
+    .target button {
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      padding: 9px 12px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    .target button.active {
+      background: var(--accent);
+      color: white;
+    }
+
+    .send {
+      border: 0;
+      background: var(--accent);
+      color: #fff;
+      padding: 10px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    aside {
+      min-height: 100vh;
+      background: var(--panel);
+      padding: 18px;
+      overflow: auto;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 13px;
+      margin-bottom: 14px;
+      background: #fbfcfd;
+    }
+
+    .panel h2 {
+      margin: 0 0 10px;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+    }
+
+    .flow {
+      display: grid;
+      gap: 8px;
+    }
+
+    .flow-step {
+      display: grid;
+      grid-template-columns: 24px 1fr;
+      align-items: start;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .num {
+      width: 24px;
+      height: 24px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+      font-weight: 700;
+      font-size: 12px;
+    }
+
+    .flow-step.active .num {
+      background: var(--accent-2);
+      color: white;
+      border-color: var(--accent-2);
+    }
+
+    .flow-step.active {
+      color: var(--ink);
+    }
+
+    .metric {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      padding: 7px 0;
+      border-bottom: 1px solid var(--line);
+      font-size: 13px;
+    }
+
+    .metric:last-child { border-bottom: 0; }
+    .metric span:first-child { color: var(--muted); }
+    .metric span:last-child { font-weight: 700; }
+
+    code {
+      background: #edf1f5;
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+
+    @media (max-width: 900px) {
+      body { grid-template-columns: 1fr; }
+      aside { min-height: auto; border-top: 1px solid var(--line); }
+      .chat { min-height: 70vh; border-right: 0; }
+    }
+  </style>
+</head>
+<body>
+  <section class="chat">
+    <header>
+      <div>
+        <h1>Stage 5 A2A Chatbot</h1>
+        <div class="subtitle">Chat UI -> Customer Agent -> Law/Tax/Compliance agents</div>
+      </div>
+      <div class="status-pill"><span class="dot" id="dot"></span><span id="status">checking services</span></div>
+    </header>
+
+    <main class="messages" id="messages">
+      <div class="msg assistant">
+        <div class="bubble">Nhap cau hoi phap ly de demo full Stage 5 A2A chatbot. Nen chay he thong Stage 5 truoc, sau do chay chatbot_server.py.</div>
+        <div class="meta">assistant</div>
+      </div>
+    </main>
+
+    <form class="composer" id="form">
+      <textarea id="question">If a company breaks a contract and avoids taxes, what are the legal and regulatory consequences?</textarea>
+      <div class="actions">
+        <div class="target" aria-label="Target agent">
+          <button type="button" class="active" data-target="customer">Full Stage 5</button>
+          <button type="button" data-target="law">Fast Law Agent</button>
+        </div>
+        <button class="send" id="send" type="submit">Send</button>
+      </div>
+    </form>
+  </section>
+
+  <aside>
+    <div class="panel">
+      <h2>Run</h2>
+      <div class="metric"><span>Server</span><span><code>localhost:8080</code></span></div>
+      <div class="metric"><span>Default mode</span><span>Customer Agent</span></div>
+      <div class="metric"><span>Last latency</span><span id="latency">--</span></div>
+      <div class="metric"><span>Task state</span><span id="state">--</span></div>
+    </div>
+
+    <div class="panel">
+      <h2>Agent Flow</h2>
+      <div class="flow" id="flow">
+        <div class="flow-step"><span class="num">1</span><span>User sends question</span></div>
+        <div class="flow-step"><span class="num">2</span><span>Customer Agent classifies/delegates</span></div>
+        <div class="flow-step"><span class="num">3</span><span>Registry discovers Law Agent</span></div>
+        <div class="flow-step"><span class="num">4</span><span>Law Agent analyzes and routes</span></div>
+        <div class="flow-step"><span class="num">5</span><span>Tax and Compliance agents run</span></div>
+        <div class="flow-step"><span class="num">6</span><span>Law aggregates final answer</span></div>
+        <div class="flow-step"><span class="num">7</span><span>Answer returns to chat</span></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Latency Benchmark</h2>
+      <div class="metric"><span>Full Stage 5</span><span>17.37s</span></div>
+      <div class="metric"><span>Fast Law path</span><span>12.34s</span></div>
+      <div class="metric"><span>Reduced</span><span>5.03s</span></div>
+      <p style="margin:10px 0 0;color:var(--muted);font-size:13px;line-height:1.45">
+        Fast mode skips Customer Agent when the caller already knows the question is legal.
+      </p>
+    </div>
+  </aside>
+
+  <script>
+    const form = document.getElementById("form");
+    const question = document.getElementById("question");
+    const messages = document.getElementById("messages");
+    const send = document.getElementById("send");
+    const statusEl = document.getElementById("status");
+    const dot = document.getElementById("dot");
+    const latencyEl = document.getElementById("latency");
+    const stateEl = document.getElementById("state");
+    const flowSteps = Array.from(document.querySelectorAll(".flow-step"));
+    let target = "customer";
+
+    document.querySelectorAll(".target button").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".target button").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        target = btn.dataset.target;
+      });
+    });
+
+    function setStatus(ok, text) {
+      dot.className = "dot " + (ok ? "ok" : "bad");
+      statusEl.textContent = text;
+    }
+
+    function addMessage(role, text, meta = "") {
+      const wrap = document.createElement("div");
+      wrap.className = "msg " + role;
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      bubble.textContent = text;
+      const m = document.createElement("div");
+      m.className = "meta";
+      m.textContent = meta || role;
+      wrap.appendChild(bubble);
+      wrap.appendChild(m);
+      messages.appendChild(wrap);
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    function animateFlow() {
+      flowSteps.forEach(s => s.classList.remove("active"));
+      flowSteps.forEach((s, idx) => {
+        setTimeout(() => s.classList.add("active"), idx * 350);
+      });
+    }
+
+    async function checkStatus() {
+      try {
+        const res = await fetch("/api/status");
+        const data = await res.json();
+        const ok = data.customer?.ok && data.law?.ok;
+        setStatus(ok, ok ? "Stage 5 reachable" : "some agents offline");
+      } catch {
+        setStatus(false, "chatbot server offline");
+      }
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const text = question.value.trim();
+      if (!text) return;
+      addMessage("user", text, target === "customer" ? "full Stage 5" : "fast Law Agent");
+      send.disabled = true;
+      send.textContent = "Running";
+      latencyEl.textContent = "--";
+      stateEl.textContent = "running";
+      animateFlow();
+
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: {"content-type": "application/json"},
+          body: JSON.stringify({question: text, target}),
+        });
+        const data = await res.json();
+        latencyEl.textContent = data.latency == null ? "--" : data.latency + "s";
+        stateEl.textContent = data.state || "unknown";
+        addMessage("assistant", data.answer || "No response.", data.ok ? "completed" : "error");
+        setStatus(data.ok, data.ok ? "completed" : "request returned error");
+      } catch (err) {
+        addMessage("assistant", "Request failed: " + err.message, "error");
+        setStatus(false, "request failed");
+      } finally {
+        send.disabled = false;
+        send.textContent = "Send";
+      }
+    });
+
+    checkStatus();
+    setInterval(checkStatus, 6000);
+  </script>
+</body>
+</html>

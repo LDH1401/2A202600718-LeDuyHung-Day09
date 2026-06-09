@@ -743,18 +743,22 @@ Hạn chế quan sát được:
 
 ## Bài Tập Cộng Điểm
 
-### 1. HTML demo tương tác Agent
+### 1. Chatbot HTML demo tương tác Agent
 
-Em đã chuẩn bị file HTML demo:
+Em đã bổ sung demo chatbot web để tương tác trực tiếp với hệ thống Stage 5 A2A:
 
 ```text
-agent_visualization.html
+chatbot_demo.html
+chatbot_server.py
 ```
 
-File này minh họa luồng tương tác Stage 5:
+Trong demo này, người dùng nhập câu hỏi trên giao diện chatbot. Server FastAPI trong `chatbot_server.py` nhận câu hỏi, sau đó gửi request A2A tới agent thật đang chạy ở Stage 5.
+
+Luồng mặc định của chatbot:
 
 ```text
-User / test_client.py
+User / chatbot_demo.html
+  -> chatbot_server.py
   -> Customer Agent
   -> Registry discover("legal_question")
   -> Law Agent
@@ -762,15 +766,55 @@ User / test_client.py
   -> Tax Agent + Compliance Agent chạy song song
   -> Law Agent aggregate
   -> Customer Agent
-  -> User
+  -> chatbot_demo.html
 ```
 
-HTML có 2 chế độ:
+Chatbot có 2 chế độ:
 
-- **Offline animation**: có thể mở file trực tiếp trong browser và bấm `Play`, `Step`, `Reset` để xem từng bước.
-- **Live mode hooks**: file đã có sẵn các hook `/api/events`, `/api/cases`, `/api/run` nếu sau này muốn nối thêm server SSE để stream event thật.
+- **Full Stage 5**: gửi câu hỏi qua Customer Agent, đúng kiến trúc đầy đủ của Stage 5.
+- **Fast Law Agent**: gửi trực tiếp tới Law Agent khi client đã biết câu hỏi thuộc domain pháp lý. Đây là mode dùng để demo phương án giảm latency.
 
-Trong HTML cũng có bảng latency benchmark:
+Các API của chatbot:
+
+```text
+GET  /             -> trả về giao diện chatbot
+GET  /api/status   -> kiểm tra Customer Agent và Law Agent có đang online không
+POST /api/chat     -> gửi câu hỏi A2A tới Customer Agent hoặc Law Agent
+```
+
+Cách chạy demo chatbot:
+
+Terminal 1, chạy toàn bộ Stage 5 services:
+
+```bash
+cd /media/le-duy-hung/code/lab9/Batch02-Day9_Multi-Agent_MCP-A2A
+OPENROUTER_MODEL=openai/gpt-4o-mini OPENROUTER_MAX_TOKENS=128 \
+uv run bash start_all.sh
+```
+
+Terminal 2, chạy chatbot server:
+
+```bash
+cd /media/le-duy-hung/code/lab9/Batch02-Day9_Multi-Agent_MCP-A2A
+OPENROUTER_MODEL=openai/gpt-4o-mini OPENROUTER_MAX_TOKENS=128 \
+uv run python chatbot_server.py
+```
+
+Sau đó mở trình duyệt:
+
+```text
+http://localhost:8080
+```
+
+Ngoài chatbot thật, em cũng chuẩn bị thêm file:
+
+```text
+agent_visualization.html
+```
+
+File này dùng để trình bày luồng agent bằng animation/offline visualization. Khi báo cáo hoặc thuyết trình, có thể dùng `chatbot_demo.html` để demo hỏi đáp thật và dùng `agent_visualization.html` để minh họa đường đi của request.
+
+Trong giao diện chatbot cũng có bảng latency benchmark:
 
 ```text
 Full Stage 5: 17.37s
