@@ -326,3 +326,545 @@ Sau đó agent tự chạy toàn bộ ReAct loop bên trong. Việc dùng `astre
 ### 5. Nhận xét về Stage 3
 
 Stage 3 cải thiện rõ so với Stage 2 vì agent tự động chia câu hỏi phức tạp thành nhiều sub-task, tự gọi nhiều tools và tự tổng hợp kết quả. Tuy nhiên, hệ thống vẫn chỉ có một agent duy nhất xử lý mọi domain. Điều này tạo hạn chế: không có chuyên môn hóa riêng cho tax, privacy hay compliance, và các tool calls vẫn là bottleneck tuần tự. Stage 4 sẽ giải quyết bằng cách tách thành nhiều agent chuyên biệt chạy song song.
+
+## Phần 4: Multi-Agent In-Process
+
+### 1. Lệnh đã chạy
+
+Chạy demo Stage 4:
+
+```bash
+uv run python stages/stage_4_milti_agent/main.py
+```
+
+Chạy bài tập thêm Privacy Agent:
+
+```bash
+OPENROUTER_MAX_TOKENS=512 uv run python exercises/exercise_4_multiagent.py
+```
+
+Em dùng `OPENROUTER_MAX_TOKENS=512` khi chạy bài exercise vì OpenRouter báo thiếu credit nếu để `max_tokens=1024`.
+
+### 2. Kết quả chạy demo Stage 4
+
+Stage 4 chạy thành công. Câu hỏi test:
+
+```text
+If a company breaks a contract and avoids taxes, what are the legal and regulatory consequences?
+```
+
+Luồng graph được in ra:
+
+```text
+analyze_law -> check_routing -> [call_tax + call_compliance] -> aggregate -> END
+```
+
+Các node đã chạy:
+
+- `analyze_law`: Lead attorney phân tích pháp lý tổng quát.
+- `check_routing`: Router quyết định `needs_tax=True`, `needs_compliance=True`.
+- `call_tax_specialist`: Tax specialist agent chạy.
+- `call_compliance_specialist`: Compliance specialist agent chạy.
+- `aggregate`: Tổng hợp các phân tích thành final answer.
+
+Kết quả cuối cùng là báo cáo tổng hợp về việc công ty vi phạm hợp đồng và trốn thuế. Nội dung chính gồm:
+
+- **Criminal consequences**: tax evasion theo 26 U.S.C. § 7201, nguy cơ phạt tù đến 5 năm, phạt tiền cho cá nhân/công ty, SOX violations, RICO nếu có pattern gian lận, trách nhiệm cá nhân của officers/directors.
+- **Civil penalties**: civil fraud penalty 75% theo IRC § 6663, accuracy-related penalty, failure-to-file/pay penalties, interest, compensatory damages, consequential damages, liquidated damages, specific performance.
+- **Corporate/regulatory consequences**: IRS audit, tax liens, asset seizures, SEC violations, officer/director bars, mất license, debarment khỏi government contracts, giảm credit rating, reputational damage.
+- **Recommended actions**: thuê legal counsel, cân nhắc voluntary disclosure với IRS, remediation compliance, negotiate settlement, internal investigation.
+
+Terminal cũng có cảnh báo deprecated:
+
+```text
+Importing Send from langgraph.constants is deprecated.
+create_react_agent has been moved to `langchain.agents`.
+```
+
+Cảnh báo này không làm demo lỗi, nhưng cho biết về sau nên đổi import sang API mới.
+
+### 3. Bước 2: Phân tích kiến trúc code
+
+#### Câu 1: `class State(TypedDict)` / shared state nằm ở đâu?
+
+Trong file demo, shared state được định nghĩa bằng `LegalState(TypedDict)`:
+
+```python
+class LegalState(TypedDict):
+    question: str
+    law_analysis: str
+    needs_tax: bool
+    needs_compliance: bool
+    tax_result: Annotated[str, _last_wins]
+    compliance_result: Annotated[str, _last_wins]
+    final_answer: str
+```
+
+State này là dữ liệu chung đi qua toàn bộ graph. `question` là đầu vào, `law_analysis` là phân tích tổng quát, `needs_tax` và `needs_compliance` là cờ routing, `tax_result` và `compliance_result` là kết quả từ specialist agents, còn `final_answer` là câu trả lời cuối cùng.
+
+`tax_result` và `compliance_result` dùng `Annotated[str, _last_wins]` để LangGraph xử lý việc nhiều nhánh song song ghi vào state.
+
+#### Câu 2: Các agent functions nằm ở đâu?
+
+Các function chính trong Stage 4 gồm:
+
+- `analyze_law`: đóng vai lead attorney, phân tích pháp lý tổng quát.
+- `check_routing`: dùng LLM để quyết định có cần tax/compliance specialist không.
+- `call_tax_specialist`: tạo ReAct tax agent inline, dùng tool `search_tax_law`.
+- `call_compliance_specialist`: tạo ReAct compliance agent inline, dùng tool `search_compliance_law`.
+- `aggregate`: tổng hợp tất cả phân tích thành final answer.
+
+Điểm khác Stage 3 là mỗi specialist có prompt riêng theo chuyên môn, thay vì một agent duy nhất xử lý mọi lĩnh vực.
+
+#### Câu 3: `Send()` API dispatch parallel tasks như thế nào?
+
+`Send()` được dùng trong hàm routing:
+
+```python
+def route_to_specialists(state: LegalState) -> list[Send]:
+    sends: list[Send] = []
+    if state.get("needs_tax"):
+        sends.append(Send("call_tax_specialist", state))
+    if state.get("needs_compliance"):
+        sends.append(Send("call_compliance_specialist", state))
+    if not sends:
+        sends.append(Send("aggregate", state))
+    return sends
+```
+
+Nếu câu hỏi cần cả tax và compliance, hàm này trả về hai `Send` objects. LangGraph sẽ dispatch hai nhánh `call_tax_specialist` và `call_compliance_specialist` song song, sau đó cả hai đều đi về `aggregate`.
+
+#### Câu 4: `graph.add_node()` và `graph.add_edge()` hoạt động như thế nào?
+
+Graph được tạo bằng `StateGraph(LegalState)`, sau đó add các node:
+
+```python
+graph.add_node("analyze_law", analyze_law)
+graph.add_node("check_routing", check_routing)
+graph.add_node("call_tax_specialist", call_tax_specialist)
+graph.add_node("call_compliance_specialist", call_compliance_specialist)
+graph.add_node("aggregate", aggregate)
+```
+
+Luồng điều khiển:
+
+```python
+graph.set_entry_point("analyze_law")
+graph.add_edge("analyze_law", "check_routing")
+graph.add_conditional_edges(
+    "check_routing",
+    route_to_specialists,
+    ["call_tax_specialist", "call_compliance_specialist", "aggregate"],
+)
+graph.add_edge("call_tax_specialist", "aggregate")
+graph.add_edge("call_compliance_specialist", "aggregate")
+graph.add_edge("aggregate", END)
+```
+
+Như vậy graph luôn bắt đầu từ `analyze_law`, sau đó router quyết định đi sang specialist nào, rồi cuối cùng tổng hợp ở `aggregate`.
+
+### 4. Bài tập 4.1 và 4.2: Thêm Privacy Agent
+
+Em đã hoàn thành trong file `exercises/exercise_4_multiagent.py`.
+
+Các thay đổi chính:
+
+- Thêm routing keyword cho privacy:
+
+```python
+if any(kw in question_lower for kw in ["data", "privacy", "gdpr", "dữ liệu", "rò rỉ"]):
+    tasks.append(Send("privacy_agent", state))
+```
+
+- Implement `privacy_agent`:
+
+```python
+def privacy_agent(state: State) -> dict:
+    """Agent chuyên về bảo vệ dữ liệu cá nhân và GDPR."""
+    llm = get_llm()
+    prompt = f"""Bạn là chuyên gia về GDPR và luật bảo vệ dữ liệu cá nhân.
+
+Câu hỏi: {state['question']}
+Phân tích pháp lý: {state.get('law_analysis', 'N/A')}
+
+Tập trung: GDPR, data protection, privacy rights, data breach, nghĩa vụ thông báo
+cho người dùng/cơ quan quản lý, tiền phạt và biện pháp khắc phục."""
+
+    response = llm.invoke([HumanMessage(content=prompt)])
+    return {"privacy_analysis": response.content}
+```
+
+- Thêm `privacy_analysis` vào phần tổng hợp:
+
+```python
+if state.get("privacy_analysis"):
+    sections.append(f"🔒 PHÂN TÍCH PRIVACY/GDPR:\n{state['privacy_analysis']}")
+```
+
+- Thêm node và edge cho privacy agent:
+
+```python
+graph.add_node("privacy_agent", privacy_agent)
+graph.add_edge("privacy_agent", "aggregate_results")
+```
+
+Trong quá trình test, em cũng sửa graph routing: `check_routing` không nên là một node trả về `list[Send]`, vì node của LangGraph phải trả về `dict`. Cách đúng là dùng `check_routing` làm routing function trong `add_conditional_edges` sau `law_agent`:
+
+```python
+graph.add_conditional_edges(
+    "law_agent",
+    check_routing,
+    ["tax_agent", "compliance_agent", "privacy_agent", "aggregate_results"],
+)
+```
+
+### 5. Kết quả chạy bài tập Privacy Agent
+
+Câu hỏi test:
+
+```text
+Nếu công ty bị rò rỉ dữ liệu khách hàng, hậu quả pháp lý và thuế là gì?
+```
+
+Bài exercise chạy thành công với:
+
+```bash
+OPENROUTER_MAX_TOKENS=512 uv run python exercises/exercise_4_multiagent.py
+```
+
+Kết quả cuối cùng bắt đầu bằng báo cáo:
+
+```text
+# BÁO CÁO PHÁP LÝ: HẬU QUẢ RÒ RỈ DỮ LIỆU KHÁCH HÀNG
+```
+
+Nội dung output xác nhận hệ thống đã tổng hợp được các hướng phân tích:
+
+- Trách nhiệm pháp lý dân sự: bồi thường thiệt hại vật chất, tinh thần, lợi ích bị mất.
+- Vi phạm hợp đồng với khách hàng: khách hàng có thể chấm dứt hợp đồng và yêu cầu bồi thường.
+- Trách nhiệm hành chính theo Nghị định 13/2023/NĐ-CP về bảo vệ dữ liệu cá nhân.
+- Nghĩa vụ khắc phục: thông báo sự cố, xóa dữ liệu thu thập trái phép, khôi phục tình trạng ban đầu.
+- Phân tích privacy/GDPR được đưa vào luồng tổng hợp thông qua `privacy_agent`.
+
+Do giới hạn token để tránh lỗi OpenRouter 402, phần final answer bị cắt ở cuối, nhưng chương trình đã exit code `0`, tức là graph chạy thành công và privacy agent đã được tích hợp đúng.
+
+### 6. Nhận xét về Stage 4
+
+Stage 4 tốt hơn Stage 3 vì hệ thống đã tách trách nhiệm cho nhiều agent chuyên môn hóa. Lead attorney phân tích tổng quát, router chọn specialist, tax/compliance/privacy agents xử lý từng domain riêng, rồi aggregator tổng hợp. `Send()` giúp các nhánh độc lập chạy song song, phù hợp với những câu hỏi nhiều mảng pháp lý. Hạn chế của Stage 4 là tất cả vẫn chạy trong cùng một process, chưa có HTTP service, chưa có A2A protocol và chưa có dynamic registry như Stage 5.
+
+## Phần 5: Distributed A2A System
+
+### 1. Lệnh đã chạy
+
+Khởi động toàn bộ hệ thống:
+
+```bash
+uv run ./start_all.sh
+```
+
+Trong quá trình test thực tế, em chạy bằng môi trường venv và model rẻ hơn để tránh lỗi thiếu credit OpenRouter:
+
+```bash
+OPENROUTER_MODEL=openai/gpt-4o-mini OPENROUTER_MAX_TOKENS=256 uv run ./start_all.sh
+```
+
+Sau đó chạy client:
+
+```bash
+OPENROUTER_MODEL=openai/gpt-4o-mini OPENROUTER_MAX_TOKENS=256 uv run python test_client.py
+```
+
+### 2. Kết quả khởi động hệ thống
+
+Stage 5 khởi động thành công 5 service độc lập:
+
+```text
+Registry:         http://localhost:10000
+Customer Agent:   http://localhost:10100
+Law Agent:        http://localhost:10101
+Tax Agent:        http://localhost:10102
+Compliance Agent: http://localhost:10103
+```
+
+Các agent đã tự đăng ký vào Registry:
+
+```text
+tax-agent          -> task: tax_question          -> http://localhost:10102
+compliance-agent   -> task: compliance_question   -> http://localhost:10103
+law-agent          -> task: legal_question        -> http://localhost:10101
+customer-agent     -> entry point                 -> http://localhost:10100
+```
+
+Điều này xác nhận cơ chế **dynamic discovery**: các agent không cần hardcode URL của nhau trong luồng xử lý chính, mà đăng ký capability với Registry khi khởi động.
+
+### 3. Kết quả chạy `test_client.py`
+
+Câu hỏi test:
+
+```text
+If a company breaks a contract and avoids taxes, what are the legal and regulatory consequences?
+```
+
+Client kết nối được với Customer Agent:
+
+```text
+Connected to agent: Customer Agent v1.0.0
+Sending request (this may take 30-60s while agents chain)...
+```
+
+Kết quả trả về có response từ hệ thống:
+
+```text
+RESPONSE:
+. Legal Actions
+The injured party may initiate a lawsuit against the breaching company...
+
+Tax Evasion Consequences
+Tax evasion involves deliberately misrepresenting or concealing information...
+```
+
+Do giới hạn `OPENROUTER_MAX_TOKENS=256`, response bị cắt ngắn ở cuối, nhưng request đã chạy qua đầy đủ các service và trả về HTTP 200.
+
+### 4. Bài tập 5.1: Trace request flow
+
+Trong logs, request được gắn `trace_id`:
+
+```text
+trace=570a5035-19f1-4c04-ae60-ec6fa5d19805
+context=479a7ceb-4307-427e-9d7d-c4efc04260bc
+```
+
+Flow quan sát được:
+
+```text
+test_client.py
+  -> Customer Agent :10100
+  -> Registry discover("legal_question")
+  -> Law Agent :10101
+  -> Registry discover("tax_question")
+  -> Registry discover("compliance_question")
+  -> Tax Agent :10102
+  -> Compliance Agent :10103
+  -> Law Agent aggregate
+  -> Customer Agent final response
+```
+
+Các log quan trọng:
+
+```text
+CustomerAgent executing ... trace=570a5035...
+Customer delegate_to_legal_agent ... depth=0
+Registry discovered law-agent for task legal_question
+LawAgent executing ... trace=570a5035... depth=1
+Routing decision: needs_tax=True needs_compliance=True
+Registry discovered compliance-agent for task compliance_question
+Registry discovered tax-agent for task tax_question
+ComplianceAgent executing ... trace=570a5035... depth=2
+TaxAgent executing ... trace=570a5035... depth=2
+Tax Agent returned 724 chars
+Compliance Agent returned 1252 chars
+```
+
+Như vậy `trace_id` được truyền xuyên suốt từ Customer Agent sang Law Agent rồi sang Tax/Compliance Agent. Đây là cơ chế quan trọng để debug hệ thống phân tán.
+
+### 5. Bài tập 5.2: Test dynamic discovery khi Tax Agent bị dừng
+
+Em dừng riêng Tax Agent, giữ các service còn lại:
+
+```text
+registry
+compliance_agent
+law_agent
+customer_agent
+```
+
+Sau đó chạy lại:
+
+```bash
+OPENROUTER_MODEL=openai/gpt-4o-mini OPENROUTER_MAX_TOKENS=256 uv run python test_client.py
+```
+
+Kết quả: client vẫn nhận được response từ hệ thống. Trong logs, Law Agent vẫn hỏi Registry:
+
+```text
+Registry discovered tax-agent for task tax_question
+```
+
+Nhưng vì process Tax Agent đã bị dừng, khi Law Agent gọi endpoint `http://localhost:10102`, nhánh tax báo lỗi:
+
+```text
+call_tax failed: All connection attempts failed
+```
+
+Compliance Agent vẫn chạy thành công:
+
+```text
+ComplianceAgent executing ... depth=2
+Compliance Agent returned 1260 chars
+```
+
+Sau đó Law Agent vẫn aggregate và Customer Agent vẫn trả response. Điều này cho thấy hệ thống có xử lý lỗi nhánh specialist: nếu Tax Agent unavailable, luồng tổng thể không sập hoàn toàn mà vẫn có thể trả lời dựa trên các phân tích còn lại. Tuy nhiên Registry hiện tại là in-memory registry đơn giản, nên nó vẫn còn record `tax-agent` dù service đã chết; hệ thống chưa có health check tự động để remove agent offline.
+
+### 6. Bài tập 5.3: Modify agent behavior
+
+Em đã sửa `tax_agent/graph.py` để Tax Agent trả lời ngắn gọn hơn. Đã thêm vào `TAX_SYSTEM_PROMPT`:
+
+```text
+Keep your response concise, under 120 words. Use short bullets and avoid
+repeating points already covered by other agents.
+```
+
+Sau khi restart hệ thống và chạy lại `test_client.py`, logs cho thấy Tax Agent vẫn được gọi bình thường:
+
+```text
+TaxAgent executing ... depth=2
+Tax Agent returned 724 chars
+```
+
+Việc sửa prompt này giúp Tax Agent tập trung hơn, tránh lặp lại phần đã được Law Agent hoặc Compliance Agent phân tích.
+
+### 7. Nhận xét về Stage 5
+
+Stage 5 khác Stage 4 ở chỗ mỗi agent là một service HTTP độc lập. Customer Agent, Law Agent, Tax Agent và Compliance Agent không gọi function trực tiếp trong cùng process nữa, mà giao tiếp qua A2A protocol. Registry đóng vai trò service discovery, cho phép agent tự đăng ký capability và được tìm theo task như `legal_question`, `tax_question`, `compliance_question`.
+
+Ưu điểm của Stage 5:
+
+- Kiến trúc phân tán, mỗi agent có thể deploy/scale riêng.
+- Có dynamic discovery qua Registry.
+- Có `trace_id` và `context_id` để debug request đi qua nhiều service.
+- Khi một specialist bị lỗi, hệ thống vẫn có thể degrade thay vì dừng hoàn toàn.
+
+Hạn chế quan sát được:
+
+- Registry hiện tại lưu in-memory, chưa có persistence.
+- Registry chưa tự health check/remove agent offline.
+- Chạy full chain tốn nhiều LLM calls, nên dễ gặp lỗi OpenRouter 402 nếu API key còn ít credit.
+- Một số API đang có deprecation warning, ví dụ endpoint `/.well-known/agent.json` và `A2AClient`.
+
+## Bài Tập Cộng Điểm
+
+### 1. HTML demo tương tác Agent
+
+Em đã chuẩn bị file HTML demo:
+
+```text
+agent_visualization.html
+```
+
+File này minh họa luồng tương tác Stage 5:
+
+```text
+User / test_client.py
+  -> Customer Agent
+  -> Registry discover("legal_question")
+  -> Law Agent
+  -> Registry discover("tax_question", "compliance_question")
+  -> Tax Agent + Compliance Agent chạy song song
+  -> Law Agent aggregate
+  -> Customer Agent
+  -> User
+```
+
+HTML có 2 chế độ:
+
+- **Offline animation**: có thể mở file trực tiếp trong browser và bấm `Play`, `Step`, `Reset` để xem từng bước.
+- **Live mode hooks**: file đã có sẵn các hook `/api/events`, `/api/cases`, `/api/run` nếu sau này muốn nối thêm server SSE để stream event thật.
+
+Trong HTML cũng có bảng latency benchmark:
+
+```text
+Full Stage 5: 17.37s
+Optimized:    12.34s
+Reduction:    5.03s (~29%)
+```
+
+### 2. Đo latency full Stage 5
+
+Em thêm script đo latency:
+
+```text
+latency_benchmark.py
+```
+
+Lệnh đo baseline full Stage 5 qua Customer Agent:
+
+```bash
+OPENROUTER_MODEL=openai/gpt-4o-mini OPENROUTER_MAX_TOKENS=128 \
+uv run python latency_benchmark.py --target customer --runs 1
+```
+
+Kết quả:
+
+```text
+Target: customer (Full Stage 5 via Customer Agent)
+Run 1: latency=17.37s state=completed response_chars=618
+Average latency: 17.37s
+```
+
+Vậy latency tổng thời gian trả lời 1 câu hỏi của hệ thống full Stage 5 là:
+
+```text
+17.37 giây
+```
+
+Lưu ý: để tránh lỗi thiếu credit OpenRouter, em đo bằng model `openai/gpt-4o-mini` và giới hạn `OPENROUTER_MAX_TOKENS=128`. Vì vậy response preview bị ngắn, nhưng A2A task state là `completed`.
+
+### 3. Phương án giảm latency
+
+Vấn đề của full Stage 5 là request phải đi qua Customer Agent trước. Customer Agent dùng LLM để xác định câu hỏi có cần legal specialist không, sau đó mới delegate sang Law Agent. Với các câu hỏi đã biết chắc là câu hỏi pháp lý, bước này tạo thêm:
+
+- 1 HTTP/A2A hop qua Customer Agent.
+- 1 LLM call để Customer Agent quyết định delegate.
+- Một vòng final response formatting ở Customer Agent.
+
+Phương án tối ưu:
+
+```text
+Nếu client đã biết câu hỏi là legal_question, gọi trực tiếp Law Agent :10101.
+```
+
+Luồng sau tối ưu:
+
+```text
+User / optimized client
+  -> Law Agent
+  -> Registry discover("tax_question", "compliance_question")
+  -> Tax Agent + Compliance Agent
+  -> Law Agent aggregate
+  -> User
+```
+
+Cách này vẫn giữ multi-agent phân tán cho phần quan trọng nhất, nhưng bỏ qua Customer Agent classification/delegation khi không cần thiết.
+
+### 4. Demo sau khi apply phương án giảm latency
+
+Lệnh đo optimized path:
+
+```bash
+OPENROUTER_MODEL=openai/gpt-4o-mini OPENROUTER_MAX_TOKENS=128 \
+uv run python latency_benchmark.py --target law --runs 1
+```
+
+Kết quả:
+
+```text
+Target: law (Optimized direct Law Agent path)
+Run 1: latency=12.34s state=completed response_chars=661
+Average latency: 12.34s
+```
+
+So sánh:
+
+| Cách chạy | Latency |
+|---|---:|
+| Full Stage 5 qua Customer Agent | 17.37s |
+| Optimized gọi trực tiếp Law Agent | 12.34s |
+| Giảm được | 5.03s |
+
+Tỷ lệ giảm:
+
+```text
+5.03 / 17.37 ≈ 28.96%
+```
+
+Kết luận: với câu hỏi đã được phân loại sẵn là legal question, gọi trực tiếp Law Agent giúp giảm khoảng **29% latency** trong lần đo này. Trade-off là client phải tự biết khi nào nên bypass Customer Agent; nếu câu hỏi người dùng chưa rõ domain, vẫn nên đi qua Customer Agent để routing an toàn hơn.

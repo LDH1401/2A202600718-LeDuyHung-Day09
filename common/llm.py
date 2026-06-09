@@ -16,5 +16,5 @@ def get_llm() -> ChatOpenAI:
         openai_api_key=os.getenv("OPENROUTER_API_KEY"),
         openai_api_base="https://openrouter.ai/api/v1",
         temperature=0.3,
-        max_tokens=int(os.getenv("OPENROUTER_MAX_TOKENS", "1024")),
+        max_tokens=int(os.getenv("OPENROUTER_MAX_TOKENS", "512")),
     )

@@ -125,6 +125,34 @@
     margin-top: 6px;
     line-height: 1.4;
   }
+  .metric-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .metric {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px;
+  }
+  .metric .label {
+    color: var(--muted);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .metric .value {
+    font-size: 18px;
+    font-weight: 700;
+    margin-top: 3px;
+  }
+  .metric-note {
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.4;
+    margin-top: 8px;
+  }
   .controls-row { display: flex; gap: 8px; flex-wrap: wrap; }
   .legend { padding: 10px 18px; border-bottom: 1px solid var(--border); font-size: 12px; }
   .legend-row {
@@ -249,7 +277,7 @@
 <body>
 <header>
   <h1>Legal Multi-Agent System — Interaction Flow</h1>
-  <div class="sub">Customer → Law → (Tax ∥ Compliance) via A2A + Registry</div>
+  <div class="sub">Stage 5: Customer -> Law -> (Tax || Compliance) via A2A + Registry</div>
   <div class="conn">
     <span class="dot" id="connDot"></span><span id="connText">Connecting…</span>
   </div>
@@ -351,6 +379,23 @@
       <button id="play" class="secondary">▶ Play</button>
       <button id="step" class="secondary">Step</button>
       <button id="reset" class="secondary">Reset</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>Latency benchmark</h3>
+    <div class="metric-grid">
+      <div class="metric">
+        <div class="label">Full Stage 5</div>
+        <div class="value">17.37s</div>
+      </div>
+      <div class="metric">
+        <div class="label">Optimized</div>
+        <div class="value">12.34s</div>
+      </div>
+    </div>
+    <div class="metric-note">
+      Optimization: call Law Agent directly for known legal questions, skipping Customer Agent classification/delegation. Reduction: 5.03s (about 29%).
     </div>
   </div>
 
@@ -639,4 +684,4 @@ if (location.protocol.startsWith("http")) connectSSE();
 else setConn("err", "Open via viz_server for live mode");
 </script>
 </body>
-</html>s
+</html>
